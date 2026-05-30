@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Install (symlink or copy) Nimbus agent skills into an agent skills directory.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+skills_dir="$repo_root/skills"
+
+target="${HOME}/.claude/skills"
+mode="symlink"   # symlink | copy
+force=0
+do_list=0
+dry_run=0
+selected=()
+
+usage() {
+  cat <<'EOF'
+Usage: install-skills [options] [skill ...]
+
+Options:
+  --list             List available skills and exit.
+  --dry-run          Print actions without changing files.
+  --target DIR       Install into DIR (default: ~/.claude/skills).
+  --mode MODE        symlink (default) or copy.
+  --force            Replace an existing installed skill.
+  -h, --help         Show this help.
+
+With no skill names, all skills are installed.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list) do_list=1; shift ;;
+    --dry-run) dry_run=1; shift ;;
+    --target) target="$2"; shift 2 ;;
+    --mode) mode="$2"; shift 2 ;;
+    --force) force=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --*) echo "unknown option: $1" >&2; usage; exit 2 ;;
+    *) selected+=("$1"); shift ;;
+  esac
+done
+
+available=()
+for d in "$skills_dir"/*/; do
+  [ -f "$d/SKILL.md" ] || continue
+  available+=("$(basename "$d")")
+done
+
+if [ "$do_list" -eq 1 ]; then
+  printf '%s\n' "${available[@]}"
+  exit 0
+fi
+
+case "$mode" in symlink|copy) ;; *) echo "invalid --mode: $mode" >&2; exit 2 ;; esac
+
+if [ "${#selected[@]}" -eq 0 ]; then
+  selected=("${available[@]}")
+fi
+
+mkdir -p "$target"
+for name in "${selected[@]}"; do
+  src="$skills_dir/$name"
+  if [ ! -f "$src/SKILL.md" ]; then
+    echo "skip: unknown skill '$name'" >&2
+    continue
+  fi
+  dst="$target/$name"
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    if [ "$force" -eq 1 ]; then
+      [ "$dry_run" -eq 1 ] && echo "rm    $dst" || rm -rf "$dst"
+    else
+      echo "exists (use --force): $dst" >&2
+      continue
+    fi
+  fi
+  if [ "$mode" = "symlink" ]; then
+    [ "$dry_run" -eq 1 ] && echo "link  $dst -> $src" || ln -sfn "$src" "$dst"
+  else
+    [ "$dry_run" -eq 1 ] && echo "copy  $src -> $dst" || cp -R "$src" "$dst"
+  fi
+done
