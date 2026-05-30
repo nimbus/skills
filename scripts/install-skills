@@ -48,13 +48,17 @@ for d in "$skills_dir"/*/; do
 done
 
 if [ "$do_list" -eq 1 ]; then
-  printf '%s\n' "${available[@]}"
+  [ "${#available[@]}" -gt 0 ] && printf '%s\n' "${available[@]}"
   exit 0
 fi
 
 case "$mode" in symlink|copy) ;; *) echo "invalid --mode: $mode" >&2; exit 2 ;; esac
 
 if [ "${#selected[@]}" -eq 0 ]; then
+  if [ "${#available[@]}" -eq 0 ]; then
+    echo "no skills found under $skills_dir" >&2
+    exit 1
+  fi
   selected=("${available[@]}")
 fi
 

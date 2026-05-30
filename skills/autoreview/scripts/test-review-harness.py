@@ -156,6 +156,10 @@ def run_reviews(repo: Path, script_dir: Path, fixture: str, engines: list[str]) 
             "local",
             "--engine",
             engine,
+            # Calibrate the engine's own security judgment on the JS fixture only.
+            # The Nimbus review criteria are about the Rust/JS backend and would be
+            # noise (and could skew the benign over-flagging check) in this harness.
+            "--no-default-context",
             "--prompt",
             MALICIOUS_PROMPT if fixture == "malicious" else BENIGN_PROMPT,
         ]
