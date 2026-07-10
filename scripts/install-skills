@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 skills_dir="$repo_root/skills"
 
-target="${HOME}/.claude/skills"
+target="${AGENTS_HOME:-$HOME/.agents}/skills"
 mode="symlink"   # symlink | copy
 force=0
 do_list=0
@@ -19,7 +19,7 @@ Usage: install-skills [options] [skill ...]
 Options:
   --list             List available skills and exit.
   --dry-run          Print actions without changing files.
-  --target DIR       Install into DIR (default: ~/.claude/skills).
+  --target DIR       Install into DIR (default: ~/.agents/skills).
   --mode MODE        symlink (default) or copy.
   --force            Replace an existing installed skill.
   -h, --help         Show this help.
@@ -62,16 +62,34 @@ if [ "${#selected[@]}" -eq 0 ]; then
   selected=("${available[@]}")
 fi
 
-mkdir -p "$target"
+missing=()
 for name in "${selected[@]}"; do
   src="$skills_dir/$name"
-  if [ ! -f "$src/SKILL.md" ]; then
-    echo "skip: unknown skill '$name'" >&2
-    continue
-  fi
+  [ -f "$src/SKILL.md" ] || missing+=("$name")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "unknown skill(s): ${missing[*]}" >&2
+  [ "${#available[@]}" -gt 0 ] && echo "available: ${available[*]}" >&2
+  exit 1
+fi
+
+if [ "$dry_run" -eq 0 ]; then
+  mkdir -p "$target"
+fi
+for name in "${selected[@]}"; do
+  src="$skills_dir/$name"
   dst="$target/$name"
   if [ -e "$dst" ] || [ -L "$dst" ]; then
     if [ "$force" -eq 1 ]; then
+      src_real="$(cd "$src" && pwd -P)"
+      dst_real=""
+      if [ ! -L "$dst" ] && [ -d "$dst" ]; then
+        dst_real="$(cd "$dst" 2>/dev/null && pwd -P || true)"
+      fi
+      if [ "$src_real" = "$dst_real" ]; then
+        echo "target is source, skipping: $dst" >&2
+        continue
+      fi
       [ "$dry_run" -eq 1 ] && echo "rm    $dst" || rm -rf "$dst"
     else
       echo "exists (use --force): $dst" >&2
@@ -79,8 +97,18 @@ for name in "${selected[@]}"; do
     fi
   fi
   if [ "$mode" = "symlink" ]; then
-    [ "$dry_run" -eq 1 ] && echo "link  $dst -> $src" || ln -sfn "$src" "$dst"
+    if [ "$dry_run" -eq 1 ]; then
+      echo "would symlink $name -> $dst"
+    else
+      ln -sfn "$src" "$dst"
+      echo "symlink $name -> $dst"
+    fi
   else
-    [ "$dry_run" -eq 1 ] && echo "copy  $src -> $dst" || cp -R "$src" "$dst"
+    if [ "$dry_run" -eq 1 ]; then
+      echo "would copy $name -> $dst"
+    else
+      cp -R "$src" "$dst"
+      echo "copy $name -> $dst"
+    fi
   fi
 done

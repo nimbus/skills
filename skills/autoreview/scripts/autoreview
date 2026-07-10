@@ -507,9 +507,61 @@ def write_json_temp(data: dict[str, Any]) -> Path:
     return Path(handle.name)
 
 
+def codex_failure_hint(engine_output: str) -> str:
+    markers = (
+        "attempt to write a readonly database",
+        "failed to initialize in-process app-server client",
+        "could not update PATH: Operation not permitted",
+        "Operation not permitted (os error 1)",
+    )
+    if not any(marker in engine_output for marker in markers):
+        return ""
+    return textwrap.dedent(
+        """
+
+        Codex engine initialization hint:
+        This commonly happens when autoreview is run from inside a sandboxed
+        Codex session and the nested Codex CLI cannot write its ~/.codex state
+        or initialize its app-server client. The skill install is probably
+        fine. Run autoreview from a normal terminal or approved internal
+        environment where the selected external review engine may receive the
+        frozen review bundle. If policy rejects sending a private bundle to an
+        external engine, do not retry through another external engine; continue
+        with a manual repo-grounded audit using the SKILL.md Contract.
+        """
+    ).rstrip()
+
+
+def in_codex_managed_session() -> bool:
+    return any(os.environ.get(name) for name in ("CODEX_SANDBOX", "CODEX_THREAD_ID"))
+
+
+def allow_nested_codex() -> bool:
+    return os.environ.get("AUTOREVIEW_ALLOW_NESTED_CODEX") == "1"
+
+
 def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
     if not args.tools:
         raise SystemExit("--no-tools is not supported by the Codex engine; use --engine claude --no-tools for a no-tools run")
+    if in_codex_managed_session() and not allow_nested_codex():
+        raise SystemExit(
+            textwrap.dedent(
+                """
+                refusing to launch nested Codex engine from inside a Codex-managed session
+
+                The helper runs Codex review through `codex exec`. When autoreview is
+                already running inside Codex, the nested CLI often cannot write ~/.codex
+                state or initialize the app-server client, and private review-bundle
+                exfiltration policy may block the call even if the CLI initializes.
+
+                Run autoreview from a normal terminal or approved internal environment,
+                use a different engine only when that outbound review is approved, or
+                continue with a manual repo-grounded audit using the SKILL.md Contract.
+                Set AUTOREVIEW_ALLOW_NESTED_CODEX=1 only when you intentionally want
+                this nested Codex call and the environment/policy allows it.
+                """
+            ).strip()
+        )
     schema_path = write_json_temp(SCHEMA)
     output_path = Path(tempfile.NamedTemporaryFile("w", suffix=".json", delete=False).name)
     cmd = [resolve_command(args.codex_bin, repo), "--ask-for-approval", "never"]
@@ -550,7 +602,8 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         schema_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
     if result.returncode != 0:
-        raise SystemExit(f"codex engine failed ({result.returncode})\n{result.stderr or result.stdout}")
+        engine_output = result.stderr or result.stdout
+        raise SystemExit(f"codex engine failed ({result.returncode})\n{engine_output}{codex_failure_hint(engine_output)}")
     return output or result.stdout
 
 

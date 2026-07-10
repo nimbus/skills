@@ -40,28 +40,72 @@ all of them, which is why it lives here rather than vendored into one repo.
 ```sh
 git clone https://github.com/nimbus/agent-skills.git
 cd agent-skills
-scripts/install-skills --list           # list skills
-scripts/install-skills --dry-run        # preview
-scripts/install-skills                  # symlink all into ~/.claude/skills
-scripts/install-skills autoreview       # just one
+scripts/install-skills --list                 # list skills
+scripts/install-skills --dry-run              # preview
+scripts/install-skills                        # symlink all into ~/.agents/skills
+scripts/install-skills autoreview             # install only selected skills
+scripts/install-skills --target ~/.codex/skills autoreview
+scripts/install-skills --mode copy --target ~/.agents/skills
+scripts/install-skills --force autoreview     # replace an existing install
 ```
 
-### Claude Code
+Symlinks are best for local development because changes in this checkout are
+immediately visible. Copies are better for portable or locked-down setups.
 
-```sh
-mkdir -p ~/.claude/skills
-ln -sfn "$(pwd)/skills/autoreview" ~/.claude/skills/autoreview
-```
+## Codex and Claude
 
-### Codex
+For Codex, symlink this repo's `skills/` directory into `~/.codex/skills`:
 
 ```sh
 mkdir -p ~/.codex/skills
 ln -sfn "$(pwd)/skills" ~/.codex/skills/agent-skills
 ```
 
-Symlinks are best for local development (changes here are immediately visible).
-Use `--mode copy` for portable or locked-down setups.
+Installing a single skill directly also works when you do not want the grouped
+`agent-skills` directory:
+
+```sh
+mkdir -p ~/.codex/skills
+ln -sfn "$(pwd)/skills/autoreview" ~/.codex/skills/autoreview
+```
+
+For Claude Code, symlink the skill into `~/.claude/skills`:
+
+```sh
+mkdir -p ~/.claude/skills
+ln -sfn "$(pwd)/skills/autoreview" ~/.claude/skills/autoreview
+```
+
+If `~/.claude/skills` already points at another shared skills folder, add
+symlinks inside that folder instead.
+
+The `autoreview` helper sends its frozen git bundle and review context to the
+selected review engine. For private workspaces, run it only where that outbound
+review is approved. From inside an active Codex or Claude session, invoking the
+same external engine can become a nested-agent call and may be blocked by local
+sandboxing or data-exfiltration policy; in that case, use the skill rubric for a
+manual repo-grounded review and report that the structured helper was blocked.
+Nested Codex is detected with `CODEX_SANDBOX`/`CODEX_THREAD_ID` and refused by
+default; set `AUTOREVIEW_ALLOW_NESTED_CODEX=1` only for an intentional approved
+nested run.
+
+Recommended one-liner for Nimbus repo `AGENTS.md` files:
+
+```text
+Shared agent workflows: install or symlink https://github.com/nimbus/agent-skills for `autoreview` and other common skills; do not vendor shared skills here unless this repo intentionally needs a zero-setup snapshot.
+```
+
+## Zero-setup repos
+
+Some important repos may need to work for contributors who cloned only that repo
+and never installed shared skills. Those repos can vendor a generated snapshot
+under `.agents/skills/`, but the snapshot is a distribution artifact, not the
+source of truth:
+
+- edit canonical skills here first
+- sync snapshots downstream after review
+- keep downstream copies small in number
+- add provenance and drift checks when a repo vendors a snapshot
 
 ## Per-repo review criteria
 
@@ -99,6 +143,8 @@ bash -n skills/autoreview/scripts/test-review-harness
 - Keep skill bodies operational, not essay-like.
 - No secrets, private hostnames, or private URLs.
 - Prefer helper scripts for repeatable command logic.
+- Do not update vendored downstream snapshots by hand. Update this repo, then
+  sync.
 
 ## Attribution & license
 
