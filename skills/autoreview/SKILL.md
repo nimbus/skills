@@ -1,3 +1,8 @@
+---
+name: autoreview
+description: "Run a structured second-model code review (Codex default; optional Claude, Pi, Droid, Copilot, Cursor, or OpenCode) as a closeout check on a local, branch, or commit diff across any Nimbus repo before commit or ship."
+---
+
 # Auto Review
 
 Run the bundled structured review helper as a local closeout check. It freezes a
