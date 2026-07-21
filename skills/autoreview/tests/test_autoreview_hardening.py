@@ -4746,6 +4746,36 @@ class AutoreviewHardeningTests(unittest.TestCase):
                     self.assertIn(f"+{line}\n", bundle)
             self.assertFalse(truncated)
 
+    def test_secret_detector_allows_safe_truncated_rust_struct_diff_fragment(
+        self,
+    ) -> None:
+        safe_fragment = (
+            "let old_token = ProjectionToken {\n"
+            "    tenant_incarnation: first\n"
+            "        .fields\n"
+            '        .get("sourceTenantIncarnation")\n'
+            "        .and_then(Value::as_u64),\n"
+            ";\n"
+        )
+        unsafe_fragment = (
+            "let old_token = ProjectionToken {\n"
+            f'    password: "{realistic_secret_value()}",\n'
+            ";\n"
+        )
+
+        self.assertFalse(
+            self.helper["secret_text_risk"](
+                safe_fragment,
+                javascript_dialect="rust",
+            )
+        )
+        self.assertTrue(
+            self.helper["secret_text_risk"](
+                unsafe_fragment,
+                javascript_dialect="rust",
+            )
+        )
+
     def test_pi_refuses_truncated_review_input(self) -> None:
         reviewer = argparse.Namespace(engine="pi", tools=True)
 

@@ -4011,7 +4011,32 @@ def safe_rust_secret_reference(
                 closer,
             )
             if expression_end is None:
-                return False
+                # `unified_diff_contents` separates non-contiguous hunks with a
+                # standalone semicolon. A Rust struct literal can therefore be
+                # intentionally incomplete even though every visible field is
+                # safe. Accept only a top-level synthetic close at that exact
+                # boundary, and still scan the visible body fail-closed.
+                hunk_boundary = re.search(
+                    r"(?m)^[ \t]*;[ \t]*\r?$",
+                    text[next_cursor + 1 :],
+                )
+                if opener != "{" or hunk_boundary is None:
+                    return False
+                boundary_start = next_cursor + 1 + hunk_boundary.start()
+                fragment = text[next_cursor:boundary_start]
+                synthetic_expression = f"{fragment}{closer}"
+                if balanced_delimiter_end(
+                    synthetic_expression,
+                    0,
+                    opener,
+                    closer,
+                ) != len(synthetic_expression):
+                    return False
+                body = text[next_cursor + 1 : boundary_start]
+                if secret_text_risk(body, javascript_dialect="rust"):
+                    return False
+                cursor = boundary_start
+                continue
             body = text[next_cursor + 1 : expression_end - 1]
             if opener == "(":
                 public_message_call = call_target.rsplit(".", 1)[-1] in {
