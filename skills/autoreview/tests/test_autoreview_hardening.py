@@ -2998,6 +2998,38 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
         )
 
+    def test_u4_shaped_real_credentials_remain_secret_like(self) -> None:
+        real_value = "ghp_" + "ActualToken1234567890"
+        cases = (
+            "to" + f'ken = "{real_value}"',
+            "pass" + 'word = "correct-horse-battery-staple"',
+            "pass" + 'word = "fixture-correct-horse-battery"',
+            "creden"
+            + "tials: ProviderCredentials::ConnectionString(\"postgres:"
+            + "//root:actual-password@db.example/app\")",
+            "-----BEGIN "
+            + "PRIVATE KEY-----\n"
+            + "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC1234567890\n"
+            + "-----END "
+            + "PRIVATE KEY-----",
+        )
+
+        for content in cases:
+            with self.subTest(content=content):
+                self.assertTrue(
+                    self.helper["secret_text_risk"](
+                        content,
+                        javascript_dialect="rust",
+                    )
+                )
+
+        self.assertEqual(
+            self.helper["review_secret_fragments"](
+                "mysql://root@127.0.0.1:3306/test"
+            ),
+            set(),
+        )
+
     def test_secret_detector_does_not_trust_in_band_suppressions(self) -> None:
         for marker in ("pragma: allowlist secret", "gitleaks:allow"):
             with self.subTest(marker=marker):
@@ -4653,6 +4685,65 @@ class AutoreviewHardeningTests(unittest.TestCase):
             bundle, truncated = self.helper["local_bundle"](repo)
 
             self.assertIn('-const request = { token: "test-token" };', bundle)
+            self.assertFalse(truncated)
+
+    def test_local_bundle_allows_u4_shaped_rust_shell_and_compose(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            repo = init_repo(Path(tempdir))
+            git(repo, "config", "diff.mnemonicPrefix", "true")
+            compose = (
+                "services:\n"
+                "  postgres:\n"
+                "    environment:\n"
+                "      POSTGRES_PASSWORD: fixture-postgres\n"
+                "  mysql:\n"
+                "    environment:\n"
+                "      MYSQL_ROOT_PASSWORD: fixture-mysql-root\n"
+            )
+            shell = (
+                'export NIMBUS_TEST_POSTGRES_URL="host=127.0.0.1 '
+                'user=postgres password=fixture-postgres dbname=postgres"\n'
+                'export NIMBUS_MYSQL_URL="mysql://root:fixture-mysql-root'
+                '@127.0.0.1:${ports}/test"\n'
+            )
+            rust = (
+                "struct ProjectionPublication {\n"
+                "    projection_"
+                + "token: Projection"
+                + "Token,\n"
+                "}\n"
+                "let to"
+                + "ken = publication."
+                + "token;\n"
+                "let config = Config {\n"
+                "    creden"
+                + "tials: ProviderCredentials::ConnectionString(connection_string),\n"
+                "};\n"
+                "let replica = Config {\n"
+                "    creden"
+                + "tials: ProviderCredentials::LibsqlReplica {\n"
+                "        primary_url,\n"
+                "        auth_"
+                + "token,\n"
+                "    },\n"
+                "};\n"
+                "let event = ProjectionPublication {\n"
+                "    token: takeover_"
+                + "token,\n"
+                "};\n"
+                "let initial = Projection"
+                + "Token::default();\n"
+            )
+            (repo / "compose.test.yaml").write_text(compose, encoding="utf-8")
+            (repo / "fixture.sh").write_text(shell, encoding="utf-8")
+            (repo / "lib.rs").write_text(rust, encoding="utf-8")
+            git(repo, "add", "compose.test.yaml", "fixture.sh", "lib.rs")
+
+            bundle, truncated = self.helper["local_bundle"](repo)
+
+            for content in (compose, shell, rust):
+                for line in content.splitlines():
+                    self.assertIn(f"+{line}\n", bundle)
             self.assertFalse(truncated)
 
     def test_pi_refuses_truncated_review_input(self) -> None:

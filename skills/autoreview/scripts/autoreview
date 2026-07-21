@@ -50,7 +50,13 @@ SAFE_GIT_CONFIG_ARGS = (
     "-c",
     "pager.show=cat",
 )
-SAFE_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-renames")
+SAFE_DIFF_FLAGS = (
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+)
 ENGINE_GIT_CONFIG_OVERRIDES = (
     ("core.fsmonitor", "false"),
     ("core.pager", "cat"),
@@ -194,7 +200,8 @@ SECRET_ASSIGNMENT_KEY_PATTERN = (
     rf"(?![A-Za-z0-9]))"
 )
 SECRET_ASSIGNMENT_PATTERN = re.compile(
-    rf"(?i){SECRET_ASSIGNMENT_KEY_PATTERN}\s*[:=]\s*"
+    rf"(?i){SECRET_ASSIGNMENT_KEY_PATTERN}\s*"
+    r"(?:=(?!=|>)|(?<!:):(?![:=]))\s*"
     r"(?:\"(?P<double_value>[^\"\r\n]{8,})\"|"
     r"'(?P<single_value>[^'\r\n]{8,})'|"
     r"`(?P<backtick_value>[^`\r\n]{8,})`|"
@@ -209,7 +216,7 @@ SECRET_ASSIGNMENT_PATTERN = re.compile(
 )
 SECRET_ASSIGNMENT_PREFIX_PATTERN = re.compile(
     rf"(?i){SECRET_ASSIGNMENT_KEY_PATTERN}"
-    r"\s*(?:=(?!=|>)|:(?![:=]))\s*"
+    r"\s*(?:=(?!=|>)|(?<!:):(?![:=]))\s*"
 )
 PRIVATE_KEY_BOUNDARY_PREFIX = r"-----"
 PRIVATE_KEY_BEGIN_PATTERN = re.compile(
@@ -3492,10 +3499,14 @@ def uri_placeholder_password_is_safe(password: str, host: str) -> bool:
         normalized_host in {"127.0.0.1", "::1", "localhost"}
         or normalized_host.endswith(".localhost")
     )
-    return localhost and normalized_password in {
-        *SECRET_PLACEHOLDER_VALUES,
-        "password",
-    }
+    return localhost and (
+        normalized_password
+        in {
+            *SECRET_PLACEHOLDER_VALUES,
+            "password",
+        }
+        or synthetic_secret_fixture(password, "password")
+    )
 
 
 def uri_userinfo_literal_risk(
@@ -3884,7 +3895,7 @@ def secret_literal_risk(
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
                 continue
             if (
-                javascript_dialect is not None
+                javascript_dialect in {"javascript", "typescript"}
                 and SOURCE_CODE_REFERENCE_ROOT_PATTERN.fullmatch(value)
             ):
                 continue
@@ -3927,10 +3938,108 @@ def synthetic_secret_fixture(value: str, key: str) -> bool:
         "-",
         camel_split_key.casefold(),
     ).strip("-")
-    return any(
+    if any(
         normalized == f"{prefix}-{normalized_key}"
         for prefix in SYNTHETIC_SECRET_PREFIXES
+    ):
+        return True
+    credential_words = {
+        "api",
+        "auth",
+        "aws",
+        "client",
+        "credential",
+        "credentials",
+        "id",
+        "key",
+        "password",
+        "private",
+        "refresh",
+        "secret",
+        "token",
+    }
+    fixture_scope = "-".join(
+        part
+        for part in normalized_key.split("-")
+        if part and part not in credential_words
     )
+    if bool(fixture_scope) and any(
+        normalized == f"{prefix}-{fixture_scope}"
+        for prefix in SYNTHETIC_SECRET_PREFIXES
+    ):
+        return True
+    prefix, separator, fixture_label = normalized.partition("-")
+    return (
+        bool(separator)
+        and prefix == "fixture"
+        and re.fullmatch(r"[a-z]{2,20}(?:-[a-z]{2,20})?", fixture_label)
+        is not None
+    )
+
+
+def safe_rust_secret_reference(
+    text: str,
+    match: re.Match[str],
+) -> bool:
+    rust_reference_text = (
+        r"[A-Za-z_][A-Za-z0-9_]*"
+        r"(?:(?:::|\.)[A-Za-z_][A-Za-z0-9_]*)*"
+    )
+    value = (
+        match.group("reference_value")
+        or match.group("call_value")
+        or match.group("bare_value")
+    )
+    if value is None or re.fullmatch(
+        rust_reference_text,
+        value,
+    ) is None:
+        return False
+    cursor = match.end()
+    call_target = value
+    while True:
+        whitespace = re.match(r"[ \t\r\n]*", text[cursor:])
+        assert whitespace is not None
+        next_cursor = cursor + whitespace.end()
+        if next_cursor < len(text) and text[next_cursor] in "({":
+            opener = text[next_cursor]
+            closer = ")" if opener == "(" else "}"
+            expression_end = balanced_delimiter_end(
+                text,
+                next_cursor,
+                opener,
+                closer,
+            )
+            if expression_end is None:
+                return False
+            body = text[next_cursor + 1 : expression_end - 1]
+            if opener == "(":
+                public_message_call = call_target.rsplit(".", 1)[-1] in {
+                    "context",
+                    "expect",
+                    "with_context",
+                }
+                if not public_message_call:
+                    for argument in split_top_level_call_arguments(body):
+                        expression = argument.strip()
+                        if re.fullmatch(
+                            rf"&?(?:mut\s+)?{rust_reference_text}(?:\(\))?",
+                            expression,
+                        ) is not None:
+                            continue
+                        if secret_literal_risk(expression, minimum_length=8):
+                            return False
+            elif secret_text_risk(body, javascript_dialect="rust"):
+                return False
+            cursor = expression_end
+            continue
+        postfix = re.match(r"(?:\.(?P<member>[A-Za-z_][A-Za-z0-9_]*)|\?)", text[next_cursor:])
+        if postfix is not None:
+            if postfix.group("member") is not None:
+                call_target = f"{call_target}.{postfix.group('member')}"
+            cursor = next_cursor + postfix.end()
+            continue
+        return safe_secret_assignment_suffix(text, cursor)
 
 
 def safe_secret_assignment_suffix(
@@ -5191,7 +5300,7 @@ def safe_self_reference_assignment(
     *,
     javascript_dialect: str | None = None,
 ) -> bool:
-    if javascript_dialect is None:
+    if javascript_dialect not in {"javascript", "typescript"}:
         return False
     value = (
         match.group("reference_value")
@@ -5234,7 +5343,7 @@ def unsafe_multiline_self_reference_assignment(
     *,
     javascript_dialect: str | None = None,
 ) -> bool:
-    if javascript_dialect is None:
+    if javascript_dialect not in {"javascript", "typescript"}:
         return False
     value = (
         match.group("reference_value")
@@ -5290,7 +5399,7 @@ def secret_text_risk(
     )
     source_reference_spans = (
         javascript_reference_spans(text)
-        if javascript_dialect is not None
+        if javascript_dialect in {"javascript", "typescript"}
         else frozenset()
     )
     for prefix in assignment_prefixes:
@@ -5299,6 +5408,12 @@ def secret_text_risk(
             text,
             assignment,
             javascript_dialect=javascript_dialect,
+        ):
+            continue
+        if (
+            assignment is not None
+            and javascript_dialect == "rust"
+            and safe_rust_secret_reference(text, assignment)
         ):
             continue
         if assignment is not None and unsafe_multiline_self_reference_assignment(
@@ -5384,6 +5499,12 @@ def secret_text_risk(
                 continue
             return True
         if (
+            javascript_dialect == "rust"
+            and not quoted
+            and safe_rust_secret_reference(text, match)
+        ):
+            continue
+        if (
             match.group("bare_value") is not None
             and len(value) < 12
             and re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", value)
@@ -5418,7 +5539,7 @@ def secret_text_risk(
                 (
                     (source_start, source_end) in source_reference_spans
                     or (
-                        javascript_dialect is not None
+                        javascript_dialect in {"javascript", "typescript"}
                         and SOURCE_CODE_REFERENCE_ROOT_PATTERN.fullmatch(value)
                     )
                 )
@@ -5550,7 +5671,7 @@ def assignment_fallback_literal_spans(
     line_end = min(line_end_candidates, default=len(text))
     expression_end = line_end
     if (
-        javascript_dialect is not None
+        javascript_dialect in {"javascript", "typescript"}
         and line_end < len(text)
         and not safe_javascript_reference_suffix(
             text,
@@ -5843,6 +5964,11 @@ def review_repeatable_secret_spans(
             javascript_dialect=javascript_dialect,
         ):
             continue
+        if (
+            javascript_dialect == "rust"
+            and safe_rust_secret_reference(text, match)
+        ):
+            continue
         fallback_spans = (
             assignment_fallback_literal_spans(
                 text,
@@ -5882,7 +6008,11 @@ def review_repeatable_secret_spans(
     )
     for authority_range in uri_authority_ranges(text):
         credential = uri_authority_credential(text, authority_range)
-        if credential is not None and credential.value:
+        if (
+            credential is not None
+            and credential.value
+            and credentialed_uri_risk(text, (authority_range,))
+        ):
             spans.append((credential.value_start, credential.value_end))
     return spans
 
@@ -5907,6 +6037,11 @@ def review_secret_value_spans(
                     text,
                     match,
                     javascript_dialect=javascript_dialect,
+                ):
+                    break
+                if (
+                    javascript_dialect == "rust"
+                    and safe_rust_secret_reference(text, match)
                 ):
                     break
                 fallback_spans = (
@@ -5949,7 +6084,11 @@ def review_secret_value_spans(
     )
     for authority_range in uri_authority_ranges(text):
         credential = uri_authority_credential(text, authority_range)
-        if credential is not None and credential.value:
+        if (
+            credential is not None
+            and credential.value
+            and credentialed_uri_risk(text, (authority_range,))
+        ):
             spans.append((credential.value_start, credential.value_end))
     return spans
 
@@ -6826,6 +6965,8 @@ def tracked_sensitive_repo_path_risk(rel: str) -> str | None:
 
 def javascript_review_dialect(rel: str) -> str | None:
     suffix = Path(rel).suffix.lower()
+    if suffix == ".rs":
+        return "rust"
     if suffix in {".cts", ".mts", ".ts", ".tsx"}:
         return "typescript"
     if suffix in {".cjs", ".js", ".jsx", ".mjs"}:
