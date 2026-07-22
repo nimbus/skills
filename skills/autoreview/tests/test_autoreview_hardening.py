@@ -4776,6 +4776,40 @@ class AutoreviewHardeningTests(unittest.TestCase):
             )
         )
 
+    def test_secret_detector_allows_rust_option_error_closure(self) -> None:
+        safe_option_error = (
+            "let se"
+            + "cret = se"
+            + "cret.ok_or_else(|| {\n"
+            "    DynamoDbError::UnrecognizedClientException(\n"
+            '        "The security to'
+            + 'ken included in the request is invalid.".to_owned(),\n'
+            "    )\n"
+            "})?;\n"
+        )
+        unsafe_option_error = (
+            "let se"
+            + "cret = se"
+            + "cret.ok_or_else(|| {\n"
+            "    let pass"
+            + f'word = "{realistic_secret_value()}";\n'
+            "    Error::new(password)\n"
+            "})?;\n"
+        )
+
+        self.assertFalse(
+            self.helper["secret_text_risk"](
+                safe_option_error,
+                javascript_dialect="rust",
+            )
+        )
+        self.assertTrue(
+            self.helper["secret_text_risk"](
+                unsafe_option_error,
+                javascript_dialect="rust",
+            )
+        )
+
     def test_pi_refuses_truncated_review_input(self) -> None:
         reviewer = argparse.Namespace(engine="pi", tools=True)
 

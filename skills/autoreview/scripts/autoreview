@@ -4039,12 +4039,17 @@ def safe_rust_secret_reference(
                 continue
             body = text[next_cursor + 1 : expression_end - 1]
             if opener == "(":
-                public_message_call = call_target.rsplit(".", 1)[-1] in {
+                non_value_argument_call = call_target.rsplit(".", 1)[-1] in {
                     "context",
                     "expect",
+                    # `Option::ok_or_else` returns the receiver's value; its
+                    # closure constructs only the error. Scan that closure for
+                    # independently secret-like syntax, but do not treat a
+                    # public error-message literal as the assigned secret.
+                    "ok_or_else",
                     "with_context",
                 }
-                if not public_message_call:
+                if not non_value_argument_call:
                     for argument in split_top_level_call_arguments(body):
                         expression = argument.strip()
                         if re.fullmatch(
@@ -4054,6 +4059,8 @@ def safe_rust_secret_reference(
                             continue
                         if secret_literal_risk(expression, minimum_length=8):
                             return False
+                elif secret_text_risk(body, javascript_dialect="rust"):
+                    return False
             elif secret_text_risk(body, javascript_dialect="rust"):
                 return False
             cursor = expression_end
