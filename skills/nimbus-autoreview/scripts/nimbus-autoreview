@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+def main() -> None:
+    if "--no-config" in sys.argv[1:]:
+        raise SystemExit(
+            "nimbus-autoreview requires its Nimbus profile config; "
+            "run the general autoreview helper for --no-config"
+        )
+
+    skill_root = Path(__file__).resolve().parents[1]
+    configured_base = os.environ.get("NIMBUS_AUTOREVIEW_BASE")
+    if configured_base:
+        base = Path(configured_base).expanduser()
+    else:
+        agents_home = Path(
+            os.environ.get("AGENTS_HOME", str(Path.home() / ".agents"))
+        ).expanduser()
+        base = agents_home / "skills" / "autoreview" / "scripts" / "autoreview"
+
+    if not base.is_file() or not os.access(base, os.X_OK):
+        raise SystemExit(
+            "general autoreview helper is missing; install "
+            "agentstation/skills@autoreview globally with npx skills"
+        )
+
+    config = skill_root / "autoreview.toml"
+    context = skill_root / "review-context" / "nimbus.md"
+    prompt = context.read_text(encoding="utf-8")
+    command = [
+        str(base),
+        "--config",
+        str(config),
+        "--prompt",
+        prompt,
+        *sys.argv[1:],
+    ]
+    os.execv(str(base), command)
+
+
+if __name__ == "__main__":
+    main()

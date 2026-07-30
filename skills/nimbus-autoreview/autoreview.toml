@@ -1,0 +1,14 @@
+version = 1
+default_profile = "nimbus"
+
+[profiles.nimbus]
+strategy = "score"
+reviewers = 1
+
+[policy]
+avoid_same_host = true
+anthropic_max_effort = "high"
+
+[candidates.sol]
+effort = "xhigh"
+deepswe_pass_rate = 71
