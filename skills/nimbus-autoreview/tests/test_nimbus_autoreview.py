@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,17 @@ WRAPPER = SKILL_ROOT / "scripts" / "nimbus-autoreview"
 
 
 class NimbusAutoreviewTests(unittest.TestCase):
+    def test_sol_profile_uses_xhigh_owner_intelligence(self) -> None:
+        config = tomllib.loads(
+            (SKILL_ROOT / "autoreview.toml").read_text(encoding="utf-8")
+        )
+        sol = config["candidates"]["sol"]
+
+        self.assertEqual(sol["effort"], "xhigh")
+        self.assertEqual(sol["intelligence"], 9)
+        self.assertEqual(sol["deepswe_pass_rate"], 71)
+        self.assertEqual(sol["deepswe_avg_cost_usd"], 4.70)
+
     def test_wrapper_delegates_with_profile_and_context(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
