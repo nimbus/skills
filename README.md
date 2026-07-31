@@ -26,7 +26,7 @@ Nimbus architecture invariants and a Nimbus model profile:
 
 - GPT-5.6 Sol uses `xhigh` for the large cross-module codebase.
 - Anthropic reviewers remain capped at `high`.
-- Fable remains explicit-only and can be requested with `--profile fable`.
+- Fable requires manual approval, granted with an explicit `--profile fable`.
 - Automatic cadence inherits the global setting, which defaults to the
   substantive-code pre-PR gate.
 

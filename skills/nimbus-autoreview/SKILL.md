@@ -19,8 +19,8 @@ tooling. It inherits global and repository autoreview configuration, then
 applies the Nimbus model profile and review criteria.
 
 The wrapper defaults GPT-5.6 Sol to `xhigh` and keeps Anthropic models at
-`high`. Automatic selection still avoids the current host harness. Fable is
-available only when explicitly requested:
+`high`. Automatic selection still avoids the current host harness. Fable
+requires manual approval, granted by explicitly requesting it:
 
 ```bash
 "$NIMBUS_AUTOREVIEW" --profile fable --mode branch --base origin/main

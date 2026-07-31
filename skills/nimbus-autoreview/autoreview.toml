@@ -12,3 +12,6 @@ anthropic_max_effort = "high"
 [candidates.sol]
 effort = "xhigh"
 deepswe_pass_rate = 71
+# $4.70 xhigh average normalized against the $9.18 Fable high reference.
+deepswe_avg_cost_usd = 4.70
+cost = 5.1
