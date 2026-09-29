@@ -24,8 +24,10 @@ same canonical `~/.agents/skills` installation as Codex.
 routing, and structured validation to `agentstation/skills@autoreview`. It adds
 Nimbus architecture invariants and a Nimbus model profile:
 
-- GPT-5.6 Sol uses `xhigh` for the large cross-module codebase.
+- GPT-6.1 Sol inherits the built-in `high` effort.
 - Anthropic reviewers remain capped at `high`.
+- For a high-risk change, add Opus 5.5 as the second reviewer with
+  `--profile cross-lab`.
 - Fable requires manual approval, granted with an explicit `--profile fable`.
 - Automatic cadence inherits the global setting, which defaults to the
   substantive-code pre-PR gate.
